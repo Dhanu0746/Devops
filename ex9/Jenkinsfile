@@ -1,0 +1,114 @@
+
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        timeout(time: 10, unit: 'MINUTES')
+    }
+
+    environment {
+        DEPLOY_DIR = "${WORKSPACE}/python-app-deploy"
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Creating virtual environment and installing dependencies'
+
+                sh '''
+                    python3 --version
+                    python3 -m venv .venv
+                    .venv/bin/python -m pip install --upgrade pip
+                    .venv/bin/python -m pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running unit tests'
+
+                sh '''
+                    .venv/bin/python -m unittest discover \
+                        -s . -p 'test_*.py' -v
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Copying application to deployment directory'
+
+                sh '''
+                    mkdir -p "$DEPLOY_DIR"
+                    cp app.py "$DEPLOY_DIR/"
+                    cp requirements.txt "$DEPLOY_DIR/"
+                    test -f "$DEPLOY_DIR/app.py"
+                    echo "Deployment files copied successfully"
+                '''
+            }
+        }
+
+        stage('Run and Verify Application') {
+            steps {
+                echo 'Starting Flask application and checking HTTP response'
+
+                sh '''
+                    set -eu
+
+                    cd "$DEPLOY_DIR"
+
+                    nohup "${WORKSPACE}/.venv/bin/python" app.py \
+                        > app.log 2>&1 &
+
+                    APP_PID=$!
+                    echo "$APP_PID" > app.pid
+
+                    cleanup() {
+                        kill "$APP_PID" 2>/dev/null || true
+                    }
+                    trap cleanup EXIT
+
+                    "${WORKSPACE}/.venv/bin/python" - <<'PY'
+import time
+import urllib.request
+
+url = "http://127.0.0.1:5000/"
+expected = "Hello, Jenkins Multi-Stage Pipeline!"
+last_error = None
+
+for _ in range(20):
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            body = response.read().decode("utf-8")
+            assert response.status == 200, response.status
+            assert body == expected, body
+            print("HTTP status:", response.status)
+            print("Response:", body)
+            break
+    except Exception as exc:
+        last_error = exc
+        time.sleep(1)
+else:
+    raise SystemExit(f"Application verification failed: {last_error}")
+PY
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the Console Output.'
+        }
+
+        always {
+            echo 'Pipeline execution finished.'
+        }
+    }
+}
