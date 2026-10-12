@@ -1,0 +1,48 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Starting the CI build...'
+                sh '''
+                    mkdir -p build-output
+                    printf "Jenkins CI build successful\\n" > build-output/app.txt
+                    cat build-output/app.txt
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running automated tests...'
+                sh '''
+                    test -s build-output/app.txt
+                    grep -q "Jenkins CI build successful" build-output/app.txt
+                    echo "All tests passed."
+                '''
+            }
+        }
+
+        stage('Package') {
+            steps {
+                echo 'Archiving build artifacts...'
+                archiveArtifacts artifacts: 'build-output/**',
+                                 fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'CI pipeline completed successfully!'
+        }
+        failure {
+            echo 'CI pipeline failed. Check the console output.'
+        }
+    }
+}
