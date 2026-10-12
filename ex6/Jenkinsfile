@@ -1,0 +1,57 @@
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Source code is available in the Jenkins workspace.'
+                sh 'ls -la'
+            }
+        }
+
+        stage('Validate Project Files') {
+            steps {
+                sh '''
+                    test -f delivery_metrics.py
+                    test -f requirements.txt
+                    test -f Dockerfile
+                    test -f docker-compose.yml
+                    test -f prometheus.yml
+                    test -f alert_rules.yml
+                    python3 -m py_compile delivery_metrics.py
+                '''
+            }
+        }
+
+        stage('Validate Prometheus Config') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v "$WORKSPACE/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+                      -v "$WORKSPACE/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro" \
+                      prom/prometheus:latest \
+                      promtool check config /etc/prometheus/prometheus.yml
+                '''
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                sh 'docker build -t delivery-monitoring:latest .'
+            }
+        }
+
+        stage('Deploy Monitoring Stack') {
+            steps {
+                sh 'docker-compose up -d --build'
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh 'docker-compose ps'
+            }
+        }
+    }
+}
